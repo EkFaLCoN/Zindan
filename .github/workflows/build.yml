@@ -1,1 +1,69 @@
+# ZindanSistemi — jar derleme
+#
+# Depoda .github/workflows/build.yml yolunda durmali.
+#
+# Kaynagi NASIL koydugun onemli degil:
+#   - dosyalari dogrudan push ettiysen         -> calisir
+#   - bir alt klasore koyduysan                -> calisir
+#   - ZIP'i acmadan attiysan                   -> zip'i kendisi acar
+#     (sadece adi ZindanSistemi ile baslayan zip'ler acilir;
+#      resourcepack zip'i depoda durabilir, karismaz)
+name: Build
 
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kaynagi al
+        uses: actions/checkout@v4
+
+      # Kokte pom.xml yoksa, depodaki zip'leri acar.
+      - name: Zip varsa ac
+        run: |
+          if ! find . -name pom.xml -not -path "*/target/*" | grep -q .; then
+            echo "pom.xml yok, zip araniyor..."
+            for z in $(find . -name "ZindanSistemi*.zip" -not -path "./.git/*"); do
+              echo "aciliyor: $z"
+              unzip -q -o "$z" -d _kaynak
+            done
+          fi
+
+      # pom.xml nerede? Bulup sonraki adimlara aktarir.
+      - name: Proje klasorunu bul
+        id: find
+        run: |
+          POM=$(find . -name pom.xml -not -path "*/target/*" | head -n1)
+          if [ -z "$POM" ]; then
+            echo "::error::pom.xml hala bulunamadi. Depodaki dosyalar asagida."
+            find . -maxdepth 3 -not -path "./.git/*" | head -50
+            exit 1
+          fi
+          DIR=$(dirname "$POM")
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "pom.xml burada: $DIR"
+
+      # Paper 26.x -> Java 25 (pom'da maven.compiler.release = 25)
+      - name: Java 25 kur
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+          cache-dependency-path: ${{ steps.find.outputs.dir }}/pom.xml
+
+      - name: Derle
+        working-directory: ${{ steps.find.outputs.dir }}
+        run: mvn -B clean package
+
+      # Actions > calisma > Artifacts altindan indirilir
+      - name: Jar'i yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZindanSistemi
+          path: ${{ steps.find.outputs.dir }}/target/*.jar
+          if-no-files-found: error
